@@ -16,6 +16,12 @@ from .errors import ConfigError
 from .redact import register_secrets
 
 DEFAULT_CVR_BASE_URL = "https://distribution.virk.dk"
+# Erhvervsstyrelsens tjeneste svarer kun på HTTP. HTTP tillades kun til denne vært,
+# kun på port 80 og kun når CVR_ALLOW_HTTP=true er sat bevidst (login sendes ukrypteret).
+CVR_HTTP_HOST = "distribution.virk.dk"
+CVR_HTTP_BASE_URL = f"http://{CVR_HTTP_HOST}"
+_TRUE_VALUES = ("1", "true", "ja", "yes")
+_FALSE_VALUES = ("", "0", "false", "nej", "no")
 DEFAULT_CVR_INDEX = "cvr-permanent/virksomhed"
 DEFAULT_TIMEOUT_SECONDS = 20.0
 
@@ -61,6 +67,7 @@ class Settings:
     telegram_bot_token: str = field(default="", repr=False)
     telegram_chat_id: str = ""
     cvr_auth_mode: str = AUTH_MODE_BASIC
+    cvr_allow_http: bool = False
     cvr_base_url: str = DEFAULT_CVR_BASE_URL
     cvr_index: str = DEFAULT_CVR_INDEX
     http_timeout: float = DEFAULT_TIMEOUT_SECONDS
@@ -72,9 +79,18 @@ class Settings:
     def cvr_auth_via_proxy(self) -> bool:
         return self.cvr_auth_mode == AUTH_MODE_PROXY
 
+    @property
+    def cvr_uses_http(self) -> bool:
+        return urlparse(self.cvr_base_url).scheme == "http"
+
     def require_cvr(self) -> None:
+        if self.cvr_auth_via_proxy and self.cvr_allow_http:
+            raise ConfigError(
+                "CVR_ALLOW_HTTP kan kun bruges med CVR_AUTH_MODE=basic.",
+                hint="Cloudmiljøets proxy understøtter ikke HTTP. HTTP er kun til drift på egen maskine eller server.",
+            )
         if self.cvr_auth_via_proxy:
-            _check_https(self.cvr_base_url)
+            _check_base_url(self.cvr_base_url, allow_http=False)
             return
         missing = [n for n, v in (("CVR_USERNAME", self.cvr_username), ("CVR_PASSWORD", self.cvr_password)) if not v]
         if missing:
@@ -82,7 +98,7 @@ class Settings:
                 f"Mangler {', '.join(missing)}.",
                 hint="Sæt variablerne i miljøets opsætning (se README.md, afsnittet 'Adgangsoplysninger').",
             )
-        _check_https(self.cvr_base_url)
+        _check_base_url(self.cvr_base_url, allow_http=self.cvr_allow_http)
 
     def require_telegram_token(self) -> None:
         if not self.telegram_bot_token:
@@ -138,9 +154,16 @@ class Settings:
         else:
             rows.append(("TELEGRAM_CHAT_ID", False, "sat, men er ikke et heltal"))
 
+        if self.cvr_allow_http and self.cvr_auth_via_proxy:
+            rows.append(("CVR_ALLOW_HTTP", False, "true, men kan ikke bruges med CVR_AUTH_MODE=proxy"))
+        elif self.cvr_allow_http:
+            rows.append(("CVR_ALLOW_HTTP", True, f"true: ADVARSEL, HTTP til {CVR_HTTP_HOST} er tilladt, og login sendes ukrypteret"))
+        else:
+            rows.append(("CVR_ALLOW_HTTP", True, "false: kun HTTPS"))
         try:
-            _check_https(self.cvr_base_url)
-            rows.append(("CVR_BASE_URL", True, self.cvr_base_url))
+            _check_base_url(self.cvr_base_url, allow_http=self.cvr_allow_http and not self.cvr_auth_via_proxy)
+            note = " (UKRYPTERET)" if self.cvr_uses_http else ""
+            rows.append(("CVR_BASE_URL", True, self.cvr_base_url + note))
         except ConfigError as err:
             rows.append(("CVR_BASE_URL", False, str(err)))
         rows.append(("CVR_INDEX", bool(_INDEX_RE.match(self.cvr_index)), self.cvr_index))
@@ -148,10 +171,18 @@ class Settings:
         return rows
 
 
-def _check_https(url: str) -> None:
+def _check_base_url(url: str, *, allow_http: bool) -> None:
     parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.hostname:
-        raise ConfigError("CVR_BASE_URL skal være en https://-adresse. Ukrypteret HTTP er ikke tilladt.")
+    if not parsed.hostname or parsed.scheme not in ("https", "http"):
+        raise ConfigError("CVR_BASE_URL skal være en https://-adresse.")
+    if parsed.scheme == "http":
+        if not allow_http:
+            raise ConfigError(
+                "CVR_BASE_URL skal være en https://-adresse. Ukrypteret HTTP er ikke tilladt.",
+                hint=f"HTTP til {CVR_HTTP_HOST} kræver CVR_ALLOW_HTTP=true (se README.md).",
+            )
+        if parsed.hostname != CVR_HTTP_HOST or parsed.port not in (None, 80):
+            raise ConfigError(f"HTTP er kun tilladt til {CVR_HTTP_BASE_URL} (port 80).")
     if parsed.username or parsed.password:
         raise ConfigError("CVR_BASE_URL må ikke indeholde brugernavn eller adgangskode.")
 
@@ -183,13 +214,20 @@ def load_settings(env: dict[str, str] | None = None, env_file: Path | None = Non
     if auth_mode not in AUTH_MODES:
         raise ConfigError("CVR_AUTH_MODE skal være 'basic' eller 'proxy'.")
 
+    allow_http_raw = get("CVR_ALLOW_HTTP").lower()
+    if allow_http_raw not in _TRUE_VALUES + _FALSE_VALUES:
+        raise ConfigError("CVR_ALLOW_HTTP skal være 'true' eller 'false'.")
+    allow_http = allow_http_raw in _TRUE_VALUES
+    default_base_url = CVR_HTTP_BASE_URL if allow_http and auth_mode == AUTH_MODE_BASIC else DEFAULT_CVR_BASE_URL
+
     settings = Settings(
         cvr_username=get("CVR_USERNAME"),
         cvr_password=source.get("CVR_PASSWORD", "") or "",  # adgangskoder trimmes ikke
         telegram_bot_token=get("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=get("TELEGRAM_CHAT_ID"),
         cvr_auth_mode=auth_mode,
-        cvr_base_url=get("CVR_BASE_URL", DEFAULT_CVR_BASE_URL).rstrip("/"),
+        cvr_allow_http=allow_http,
+        cvr_base_url=get("CVR_BASE_URL", default_base_url).rstrip("/"),
         cvr_index=get("CVR_INDEX", DEFAULT_CVR_INDEX).strip("/"),
         http_timeout=timeout,
         env_file=used_file,

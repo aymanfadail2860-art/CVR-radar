@@ -14,7 +14,7 @@ from typing import Any
 import requests
 from requests.auth import AuthBase
 
-from .config import Settings
+from .config import CVR_HTTP_HOST, Settings
 from .errors import (
     AuthenticationError,
     NetworkError,
@@ -86,6 +86,7 @@ class CvrClient:
             service=SERVICE,
             timeout=self._settings.http_timeout,
             json=body,
+            allow_http_host=CVR_HTTP_HOST if self._settings.cvr_allow_http else None,
             auth=self._auth,
             headers={"Accept": "application/json"},
         )

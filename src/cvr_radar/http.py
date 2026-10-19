@@ -1,6 +1,7 @@
 """Fælles HTTP-kald med ensartet, maskeret fejlhåndtering.
 
-- Kun HTTPS, normal certifikatkontrol (requests' standard; `verify` sættes aldrig til False).
+- HTTPS med normal certifikatkontrol (requests' standard; `verify` sættes aldrig til False).
+  Ukrypteret HTTP kun til én navngiven vært (`allow_http_host`), når kalderen beder om det.
 - Redirects følges ikke, så et svar kan aldrig føre os over på ukrypteret HTTP.
 - Netværksfejl oversættes til `NetworkError`/`TimeoutError_`, aldrig til loginfejl.
 """
@@ -8,6 +9,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -30,9 +32,17 @@ def send(
     *,
     service: str,
     timeout: float,
+    allow_http_host: str | None = None,
     **kwargs: Any,
 ) -> requests.Response:
-    if not url.startswith("https://"):
+    parsed = urlparse(url)
+    plain_http_ok = (
+        allow_http_host is not None
+        and parsed.scheme == "http"
+        and parsed.hostname == allow_http_host
+        and parsed.port in (None, 80)
+    )
+    if parsed.scheme != "https" and not plain_http_ok:
         raise NetworkError(f"Afviser ikke-krypteret forbindelse til {service}.")
     try:
         return session.request(method, url, timeout=timeout, allow_redirects=False, **kwargs)
