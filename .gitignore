@@ -1,0 +1,26 @@
+# Hemmeligheder – må aldrig i Git
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# Fremtidige lokale data (database, logfiler)
+*.sqlite
+*.sqlite3
+*.db
+*.log
+data/
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
