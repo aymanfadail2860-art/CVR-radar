@@ -19,7 +19,7 @@ FAKE_USERNAME = "test_cvr_user"
 @pytest.fixture(autouse=True)
 def isolate(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     for name in ("CVR_USERNAME", "CVR_PASSWORD", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-                 "CVR_BASE_URL", "CVR_INDEX", "HTTP_TIMEOUT_SECONDS"):
+                 "CVR_AUTH_MODE", "CVR_BASE_URL", "CVR_INDEX", "HTTP_TIMEOUT_SECONDS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("CVR_RADAR_ENV_FILE", str(tmp_path / "ingen.env"))
 

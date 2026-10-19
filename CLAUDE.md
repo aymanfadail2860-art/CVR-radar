@@ -38,6 +38,16 @@ dokumentation og brugervendte meddelelser skrives på dansk. Status og roadmap s
 - Hold afhængighederne få. Tilføj kun en ny pakke, hvis den sparer væsentlig kode.
 
 ## Cloudmiljø
+CVR-login kommer fra en netværkshemmelighed (Basic, `distribution.virk.dk`). Kør derfor med
+`CVR_AUTH_MODE=proxy`. I den tilstand må koden aldrig selv sætte `Authorization`, kræve
+`CVR_USERNAME`/`CVR_PASSWORD` eller sende dummy-login (se `ProxyInjectedAuth`). Tilstanden
+`basic` skal bevares til serverdrift.
+
+Status 2026-10-19: Proxyen svarer `502 upstream request failed` for alle
+`https://distribution.virk.dk`-adresser. Erhvervsstyrelsens eksempler bruger `http://`. Skift
+ikke til HTTP, til en anden port eller til en tredjepartstjeneste uden en officiel
+HTTPS-adresse fra Erhvervsstyrelsen.
+
 Netværket kræver, at `distribution.virk.dk` og `api.telegram.org` står under
 **Allowed domains**. Ellers giver kommandoerne `NetworkError` (proxy 403), og det er ikke
 en loginfejl.

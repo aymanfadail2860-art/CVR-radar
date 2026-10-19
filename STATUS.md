@@ -12,13 +12,22 @@ Opdateret: 2026-10-19
 | CVR-klient med opslag på 10150817 og fejlhåndtering | Færdig, men **ikke verificeret mod den rigtige server** |
 | Telegram `getMe`, webhook-tjek, find privat chat, én testbesked | Færdig, men **ikke verificeret mod Telegram** |
 | Maskering af hemmeligheder i output og logning | Færdig |
-| Automatiserede tests (simulerede svar) | 72 tests består |
+| CVR-loginmåde `CVR_AUTH_MODE=proxy` (netværkshemmelighed i cloud) og `basic` (server) | Færdig |
+| Automatiserede tests (simulerede svar) | 93 tests består |
 
 ### Ikke verificeret endnu
 
-- **CVR:** Netværkspolitikken i cloudmiljøet blokerer `distribution.virk.dk`, og
-  `CVR_USERNAME`/`CVR_PASSWORD` er ikke sat. Den autentificerede test er ikke udført. Det
-  er heller ikke bekræftet i praksis, at endpoint-stien og HTTPS på port 443 virker.
+- **CVR (forsøgt 2026-10-19 i proxytilstand):** Netværkshemmeligheden er sat op, og
+  forespørgslen når cloudproxyen. Proxyen svarer dog `HTTP 502 upstream request failed`
+  efter cirka 6 sekunder. Det gælder både `/cvr-permanent/virksomhed/_search` og forsiden
+  `https://distribution.virk.dk/`.
+  - Erhvervsstyrelsen har altså ikke svaret, og loginet er ikke afprøvet. Det er hverken
+    401, 403 eller en serverfejl hos CVR.
+  - Erhvervsstyrelsens officielle eksempler bruger `http://distribution.virk.dk`. Den
+    sandsynlige årsag er, at tjenesten ikke svarer på HTTPS/443, eller at den afviser
+    cloudmiljøets IP-adresser. Det er ikke bekræftet.
+  - CVR Radar skifter ikke til HTTP. Afventer svar fra Erhvervsstyrelsen om en officiel
+    HTTPS-adresse.
 - **Telegram:** `api.telegram.org` er blokeret, og der er ingen bot-token eller chat-ID.
   Botten er ikke bekræftet.
 

@@ -58,12 +58,34 @@ Programmet læser fire miljøvariabler:
 | `TELEGRAM_BOT_TOKEN` | Token fra @BotFather |
 | `TELEGRAM_CHAT_ID` | ID på din private chat med botten (findes med `telegram-find-chat`) |
 
-Valgfrie: `CVR_BASE_URL` (standard `https://distribution.virk.dk`, kun `https://` tilladt),
+Valgfrie: `CVR_AUTH_MODE` (`basic` eller `proxy`, standard `basic`, se nedenfor), `CVR_BASE_URL` (standard `https://distribution.virk.dk`, kun `https://` tilladt),
 `CVR_INDEX` (standard `cvr-permanent/virksomhed`), `HTTP_TIMEOUT_SECONDS` (standard 20).
 
 **Indsæt aldrig adgangskoder eller tokens i chatten med Claude.**
 
+### CVR-loginmåder (`CVR_AUTH_MODE`)
+
+| Tilstand | Hvem sender Basic-login? | Kræver `CVR_USERNAME`/`CVR_PASSWORD` | Bruges til |
+|---|---|---|---|
+| `basic` (standard) | Programmet selv | Ja | Senere serverdrift |
+| `proxy` | Cloudmiljøets netværksproxy (netværkshemmelighed af typen Basic for `distribution.virk.dk`) | Nej. Værdierne ignoreres, hvis de er sat. | Claude Code cloud |
+
+I `proxy`-tilstand sætter programmet aldrig selv en `Authorization`-header. Det henter heller
+ikke login fra `~/.netrc` og sender intet dummy-login. HTTPS, certifikatkontrol, den
+almindelige proxyopsætning (`HTTPS_PROXY`) og forbuddet mod omdirigeringer gælder uændret.
+`check-config` viser tilstanden, men CVR-adgangen er først verificeret, når `cvr-test` er
+lykkedes.
+
 ### A. Claude Code cloud (nuværende miljø)
+
+**Anbefalet: netværkshemmelighed.** Under **Network secrets** i **Edit cloud environment**
+tilføjer du en hemmelighed af typen Basic med tilladt websted `distribution.virk.dk`.
+Brugernavn og adgangskode gemmes i hemmeligheden, ikke i miljøvariabler. Sessionen kan ikke
+se dem. Tilføj derefter kun `CVR_AUTH_MODE=proxy` under **Environment variables**, eller sæt
+den foran kommandoen: `CVR_AUTH_MODE=proxy cvr-radar cvr-test`.
+
+**Alternativ: miljøvariabler** (tilstand `basic`). Trin 3 nedenfor gælder kun, hvis du ikke
+bruger en netværkshemmelighed.
 
 1. Åbn sessionen på claude.ai/code. Vælg pilen efter sessionens titel øverst og derefter
    **Edit cloud environment**.
@@ -144,6 +166,7 @@ Fejl håndteres hver for sig:
 | HTTP 403 | Manglende rettigheder |
 | HTTP 429 | Begrænsning af forespørgsler (respekterer `Retry-After`) |
 | HTTP 5xx | Serverfejl |
+| HTTP 502 `upstream request failed` fra cloudproxyen | Netværksfejl. CVR har ikke svaret. |
 | Timeout | Timeout. Siger intet om login. |
 | DNS/proxy/firewall | Netværksfejl, *ikke et loginproblem* |
 | Certifikatfejl | Afbrydes. Certifikatkontrollen slås aldrig fra. |

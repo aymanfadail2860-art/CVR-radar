@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+from requests.auth import AuthBase
 
 from .config import Settings
 from .errors import (
     AuthenticationError,
+    NetworkError,
     NotFoundError,
     PermissionDeniedError,
     RateLimitedError,
@@ -52,12 +54,29 @@ def validate_cvr_number(value: str | int) -> int:
     return int(text)
 
 
+class ProxyInjectedAuth(AuthBase):
+    """Proxytilstand: send intet login selv; miljøets netværksproxy tilføjer Basic-login.
+
+    At angive et auth-objekt forhindrer også, at requests henter login fra ~/.netrc,
+    og en eventuel Authorization-header fjernes, før forespørgslen sendes.
+    """
+
+    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
+        request.headers.pop("Authorization", None)
+        return request
+
+
 class CvrClient:
     def __init__(self, settings: Settings, session: requests.Session | None = None) -> None:
         settings.require_cvr()
         self._settings = settings
         self._session = session or new_session()
         self.search_url = f"{settings.cvr_base_url}/{settings.cvr_index}/_search"
+        self._auth: AuthBase | tuple[str, str]
+        if settings.cvr_auth_via_proxy:
+            self._auth = ProxyInjectedAuth()
+        else:
+            self._auth = (settings.cvr_username, settings.cvr_password)
 
     def search(self, body: dict[str, Any]) -> dict[str, Any]:
         response = send(
@@ -67,10 +86,10 @@ class CvrClient:
             service=SERVICE,
             timeout=self._settings.http_timeout,
             json=body,
-            auth=(self._settings.cvr_username, self._settings.cvr_password),
+            auth=self._auth,
             headers={"Accept": "application/json"},
         )
-        _raise_for_status(response)
+        _raise_for_status(response, via_proxy=self._settings.cvr_auth_via_proxy)
         try:
             data = response.json()
         except ValueError:
@@ -102,10 +121,26 @@ def parse_company(hit: dict[str, Any]) -> Company:
     return Company(cvr_number=cvr_number, name=str(name))
 
 
-def _raise_for_status(response: requests.Response) -> None:
+def _is_proxy_upstream_failure(response: requests.Response) -> bool:
+    """Claude Code-miljøets proxy svarer selv med kort tekst, når den ikke kan nå værten."""
+    return (
+        response.headers.get("Content-Type", "").startswith("text/plain")
+        and response.text.strip().lower() == "upstream request failed"
+    )
+
+
+def _raise_for_status(response: requests.Response, *, via_proxy: bool = False) -> None:
     status = response.status_code
     if 200 <= status < 300:
         return
+    if status == 401 and via_proxy:
+        raise AuthenticationError(
+            "CVR afviste login (HTTP 401). I proxytilstand kommer loginet fra miljøets netværkshemmelighed.",
+            hint=(
+                "Kontrollér brugernavn og adgangskode i netværkshemmeligheden, og at den gælder for "
+                "distribution.virk.dk. Kun HTTP 401 betyder afvist login."
+            ),
+        )
     if status == 401:
         raise AuthenticationError(
             "CVR afviste login (HTTP 401): brugernavn eller adgangskode er forkert.",
@@ -123,6 +158,15 @@ def _raise_for_status(response: requests.Response) -> None:
             + (f" Vent mindst {wait:g} sekunder." if wait is not None else ""),
             retry_after=wait,
             hint="Send ikke flere forespørgsler lige nu.",
+        )
+    if status in (502, 503, 504) and _is_proxy_upstream_failure(response):
+        raise NetworkError(
+            f"Netværksproxyen kunne ikke nå CVR-serveren (HTTP {status} fra proxyen: upstream request failed). "
+            "CVR har ikke svaret, og loginet er ikke afprøvet.",
+            hint=(
+                "Erhvervsstyrelsens egne eksempler bruger http://, og HTTPS-adressen svarer ikke herfra. "
+                "CVR Radar falder ikke tilbage til HTTP. Få oplyst en HTTPS-adresse af Erhvervsstyrelsen."
+            ),
         )
     if status >= 500:
         raise ServerError(f"CVR-serveren svarede med fejl (HTTP {status}). Prøv igen senere.")

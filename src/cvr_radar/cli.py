@@ -39,6 +39,8 @@ def cmd_check_config(settings: Settings, args: argparse.Namespace) -> int:
         all_ok &= ok
         out(f"  [{'OK' if ok else '--'}] {name}: {detail}")
     out()
+    if settings.cvr_auth_via_proxy:
+        out("CVR-adgang i proxytilstand er IKKE verificeret, før 'cvr-radar cvr-test' er lykkedes.")
     if all_ok:
         out("Alle indstillinger er udfyldt. Forbindelserne er IKKE afprøvet af denne kommando.")
         return EXIT_OK
@@ -52,9 +54,10 @@ def cmd_cvr_test(settings: Settings, args: argparse.Namespace) -> int:
     except ValueError as err:
         raise ConfigError(str(err)) from None
     client = CvrClient(settings)
-    out(f"Slår CVR-nummer {cvr_number} op via {client.search_url} ...")
+    mode = "proxy (login tilføjes af netværksproxyen)" if settings.cvr_auth_via_proxy else "basic"
+    out(f"Slår CVR-nummer {cvr_number} op via {client.search_url} (login: {mode}) ...")
     company = client.lookup_company(cvr_number)
-    out("CVR-forbindelsen virker.")
+    out("CVR-forbindelsen virker: autentificeret opslag gennemført.")
     out(f"  CVR-nummer: {company.cvr_number}")
     out(f"  Navn:       {company.name}")
     return EXIT_OK

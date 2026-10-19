@@ -19,6 +19,12 @@ DEFAULT_CVR_BASE_URL = "https://distribution.virk.dk"
 DEFAULT_CVR_INDEX = "cvr-permanent/virksomhed"
 DEFAULT_TIMEOUT_SECONDS = 20.0
 
+# basic: programmet sender selv HTTP Basic-login (serverdrift).
+# proxy: miljøets netværksproxy tilføjer Basic-login (Claude Code cloud med netværkshemmelighed).
+AUTH_MODE_BASIC = "basic"
+AUTH_MODE_PROXY = "proxy"
+AUTH_MODES = (AUTH_MODE_BASIC, AUTH_MODE_PROXY)
+
 SECRET_VARS = ("CVR_PASSWORD", "TELEGRAM_BOT_TOKEN")
 REQUIRED_VARS = ("CVR_USERNAME", "CVR_PASSWORD", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
@@ -54,6 +60,7 @@ class Settings:
     cvr_password: str = field(default="", repr=False)
     telegram_bot_token: str = field(default="", repr=False)
     telegram_chat_id: str = ""
+    cvr_auth_mode: str = AUTH_MODE_BASIC
     cvr_base_url: str = DEFAULT_CVR_BASE_URL
     cvr_index: str = DEFAULT_CVR_INDEX
     http_timeout: float = DEFAULT_TIMEOUT_SECONDS
@@ -61,7 +68,14 @@ class Settings:
 
     # --- Krav pr. kommando --------------------------------------------------
 
+    @property
+    def cvr_auth_via_proxy(self) -> bool:
+        return self.cvr_auth_mode == AUTH_MODE_PROXY
+
     def require_cvr(self) -> None:
+        if self.cvr_auth_via_proxy:
+            _check_https(self.cvr_base_url)
+            return
         missing = [n for n, v in (("CVR_USERNAME", self.cvr_username), ("CVR_PASSWORD", self.cvr_password)) if not v]
         if missing:
             raise ConfigError(
@@ -93,8 +107,22 @@ class Settings:
     def describe(self) -> list[tuple[str, bool, str]]:
         """Returnér (navn, ok, beskrivelse) for hver indstilling. Hemmeligheder vises aldrig."""
         rows: list[tuple[str, bool, str]] = []
-        rows.append(("CVR_USERNAME", bool(self.cvr_username), "sat" if self.cvr_username else "mangler"))
-        rows.append(("CVR_PASSWORD", bool(self.cvr_password), "sat (skjult)" if self.cvr_password else "mangler"))
+        if self.cvr_auth_via_proxy:
+            rows.append((
+                "CVR_AUTH_MODE", True,
+                "proxy: miljøets netværksproxy skal tilføje Basic-login (ikke verificeret før et vellykket cvr-test)",
+            ))
+            for name, value in (("CVR_USERNAME", self.cvr_username), ("CVR_PASSWORD", self.cvr_password)):
+                rows.append((name, True, "sat, men ignoreres i proxytilstand" if value else "ikke påkrævet i proxytilstand"))
+            has_proxy = bool(os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"))
+            rows.append((
+                "HTTPS_PROXY", has_proxy,
+                "sat (miljøets netværksproxy)" if has_proxy else "ikke sat: proxytilstand kræver miljøets netværksproxy",
+            ))
+        else:
+            rows.append(("CVR_AUTH_MODE", True, "basic: programmet sender selv Basic-login"))
+            rows.append(("CVR_USERNAME", bool(self.cvr_username), "sat" if self.cvr_username else "mangler"))
+            rows.append(("CVR_PASSWORD", bool(self.cvr_password), "sat (skjult)" if self.cvr_password else "mangler"))
 
         if not self.telegram_bot_token:
             rows.append(("TELEGRAM_BOT_TOKEN", False, "mangler"))
@@ -151,11 +179,16 @@ def load_settings(env: dict[str, str] | None = None, env_file: Path | None = Non
     except ValueError:
         raise ConfigError("HTTP_TIMEOUT_SECONDS skal være et tal mellem 1 og 120.") from None
 
+    auth_mode = get("CVR_AUTH_MODE", AUTH_MODE_BASIC).lower()
+    if auth_mode not in AUTH_MODES:
+        raise ConfigError("CVR_AUTH_MODE skal være 'basic' eller 'proxy'.")
+
     settings = Settings(
         cvr_username=get("CVR_USERNAME"),
         cvr_password=source.get("CVR_PASSWORD", "") or "",  # adgangskoder trimmes ikke
         telegram_bot_token=get("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=get("TELEGRAM_CHAT_ID"),
+        cvr_auth_mode=auth_mode,
         cvr_base_url=get("CVR_BASE_URL", DEFAULT_CVR_BASE_URL).rstrip("/"),
         cvr_index=get("CVR_INDEX", DEFAULT_CVR_INDEX).strip("/"),
         http_timeout=timeout,
